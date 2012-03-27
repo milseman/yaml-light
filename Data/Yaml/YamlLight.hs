@@ -22,6 +22,7 @@ module Data.Yaml.YamlLight
   , combineSequencedMaps, combineMappedSequences, getTerminalsKeys
     -- ** Extractors
   , unSeq, unMap, unStr
+  ,  (*!), (|!)
   ) where
   import Control.Applicative
 --  import Data.Data
@@ -145,8 +146,8 @@ module Data.Yaml.YamlLight
   flattenTags (a,bs) = map ((,) a) bs
 
 
-  {- | Create a list of all the terminal YStrs in a YamlLight tree, and couple them with a list of all the keys
-       above them.
+  {- | Create a list of all the terminal YStrs in a YamlLight tree, and couple them with a list of
+       all the keys above them.
 
        Example:
 
@@ -194,6 +195,57 @@ module Data.Yaml.YamlLight
   unStr _       = Nothing
 
 
+  -- | '(|!)' and '(*!)' are combinators that simplify accessing values within nested
+  --   maps. Consider the following YAML document.
+  --
+  --   @
+  --     foo:
+  --       a:
+  --        - 1
+  --        - 2
+  --        - 3
+  --       b: barry
+  --     bar:
+  --       c:
+  --         d: dale
+  --         e: estelle
+  --   @
+  --
+  --
+  --   @y *! \"foo\" |! \"a\"  == Just (YSeq [YStr \"1\",YStr \"2\",YStr \"3\"])@
+  --
+  --   @y *! \"food\" |! \"a\" == Nothing@
+  --
+  --   @y *! \"bar\"         == Just (YMap (fromList [(YStr \"c\",YMap
+  --                                      (fromList [(YStr \"d\",YStr \"dale\"),
+  --                                          (YStr \"e\",YStr \"estelle\")]))]))@
+  --
+  --   @y *! \"bar\" |! \"c\" |! \"d\" == Just (YStr \"dale\")@
+  --
+  --   Use an application of '*!' followed by zero or more applications of '|!' to get the
+  --   value you want.
+  --
+  --   For @y *! key@ will be returned if:
+  --
+  --     * @y@ not contructed with 'YMap'.
+  --
+  --     * @YStr key@ is not a key in the map.
+  --
+  --   Similarly for '|!'
+  --
+  (*!) :: YamlLight -> ByteString.ByteString -> Maybe YamlLight
+  (*!) = (|!) . Just
+
+
+  (|!) :: Maybe YamlLight -> ByteString.ByteString -> Maybe YamlLight
+  my |! s = do -- maybe monad
+   y <- my
+   lookupYL (YStr s) y
+
+
+
+  infixl 5 |!, *!
+
   -- tests
 
   performTest :: Show a => (YamlLight -> a) -> String -> IO ()
@@ -211,6 +263,18 @@ module Data.Yaml.YamlLight
   gtKeys3 = "a: {b: [c, {d: [e, f]}]}"
   gtKeys4 = "[{a: {b: [c1, c2], d: [e1, e2]}, f: [g]}, h]"
 
+  nestedMap = "foo:\n\
+              \  a:\n\
+              \    - 1\n\
+              \    - 2\n\
+              \    - 3\n\
+              \  b: barry\n\
+              \bar:\n\
+              \  c:\n\
+              \    d: dale\n\
+              \    e: estelle"
+
+
   testCombineSequencedMaps1 = performTest combineSequencedMaps cSeqMap1
 
   testCombineMappedSequences1 = performTest combineMappedSequences cMapSeq1
@@ -219,3 +283,8 @@ module Data.Yaml.YamlLight
   testGetTerminalsKeys2 = performTest getTerminalsKeys gtKeys2
   testGetTerminalsKeys3 = performTest getTerminalsKeys gtKeys3
   testGetTerminalsKeys4 = performTest getTerminalsKeys gtKeys4
+
+  testNestedMap1 = performTest (\y -> y *! "foo" |! "a") nestedMap
+  testNestedMap2 = performTest (\y -> y *! "food" |! "a") nestedMap
+  testNestedMap3 = performTest (\y -> y *! "bar") nestedMap
+  testNestedMap4 = performTest (\y -> y *! "bar" |! "c" |! "d") nestedMap
